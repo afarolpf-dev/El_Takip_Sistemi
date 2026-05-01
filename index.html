@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Handy AI Lite</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <style>
+        :root { --accent: #7cffc4; --write: #6bb5ff; }
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; }
+        
+        /* Video ve Çizim Katmanları */
+        video, canvas { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+        video { transform: scaleX(-1); z-index: 1; filter: brightness(0.8); }
+        #fxCanvas { z-index: 2; pointer-events: none; }
+
+        /* Arayüz */
+        .ui { position: fixed; z-index: 10; width: 100%; display: flex; flex-direction: column; align-items: center; }
+        .top { top: 20px; }
+        .bottom { bottom: 30px; }
+
+        .modes { display: flex; background: rgba(0,0,0,0.6); padding: 5px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.2); }
+        button { 
+            background: none; border: none; color: #888; padding: 10px 20px; 
+            border-radius: 20px; cursor: pointer; font-weight: bold; transition: 0.3s;
+        }
+        button.active { background: var(--accent); color: #000; }
+        button.write-active { background: var(--write); color: #000; }
+
+        #status { font-size: 12px; margin-top: 10px; background: rgba(0,0,0,0.4); padding: 4px 12px; border-radius: 10px; }
+        
+        #splash { 
+            position: fixed; inset: 0; z-index: 100; background: #03020a; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center; 
+        }
+        .start-btn { background: var(--accent); color: #000; padding: 15px 40px; border-radius: 50px; font-weight: 800; border: none; }
+
+        .copyright { position: fixed; bottom: 5px; right: 10px; z-index: 101; font-size: 10px; color: #fff; opacity: 0.5; text-decoration: none; }
+    </style>
+</head>
+<body>
+
+    <div id="splash">
+        <h1 style="font-family: sans-serif; margin-bottom: 20px;">Handy AI</h1>
+        <button class="start-btn" onclick="start()">BAŞLAT</button>
+    </div>
+
+    <video id="webcam" playsinline></video>
+    <canvas id="fxCanvas"></canvas>
+
+    <div class="ui top">
+        <div class="modes">
+            <button id="btnPlay" class="active" onclick="setMode('play')">İZLE</button>
+            <button id="btnWrite" onclick="setMode('write')">ÇİZ</button>
+        </div>
+        <div id="status">Kamera bekleniyor...</div>
+    </div>
+
+    <div class="ui bottom">
+        <button id="clearBtn" style="display:none; background: rgba(255,0,0,0.5); color: white;" onclick="clearDraw()">TEMİZLE</button>
+    </div>
+
+    <a href="https://www.instagram.com/mithun.ai.lab/" class="copyright" target="_blank">Created by Mithun AI Lab</a>
+
+    <script>
+        /**
+         * HANDY AI LITE
+         * Created by Mithun AI Lab
+         * https://www.instagram.com/mithun.ai.lab/
+         */
+
+        let mode = 'play';
+        let paths = [];
+        let activePath = [];
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('fxCanvas');
+        const ctx = canvas.getContext('2d');
+
+        async function start() {
+            document.getElementById('splash').style.display = 'none';
+            const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+            
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 0, // En hızlı model
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onResults);
+
+            const camera = new Camera(video, {
+                onFrame: async () => { await hands.send({image: video}); },
+                width: 640, height: 480
+            });
+            camera.start();
+        }
+
+        function setMode(m) {
+            mode = m;
+            document.getElementById('btnPlay').className = mode === 'play' ? 'active' : '';
+            document.getElementById('btnWrite').className = mode === 'write' ? 'write-active' : '';
+            document.getElementById('clearBtn').style.display = mode === 'write' ? 'block' : 'none';
+        }
+
+        function onResults(results) {
+            const w = canvas.width = window.innerWidth;
+            const h = canvas.height = window.innerHeight;
+            ctx.clearRect(0, 0, w, h);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                document.getElementById('status').innerText = "EL ALGILANDI";
+                const lm = results.multiHandLandmarks[0];
+                
+                const indexTip = { x: (1 - lm[8].x) * w, y: lm[8].y * h };
+                const thumbTip = { x: (1 - lm[4].x) * w, y: lm[4].y * h };
+
+                if (mode === 'play') {
+                    // Sadece eklem noktalarını çiz
+                    ctx.fillStyle = '#7cffc4';
+                    lm.forEach(p => {
+                        ctx.beginPath();
+                        ctx.arc((1 - p.x) * w, p.y * h, 4, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+                } else {
+                    // Yazma Modu: İşaret parmağı havadaysa çiz
+                    const dist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+                    if (dist > 50) { // Parmaklar açıkken çiz
+                        activePath.push({x: indexTip.x, y: indexTip.y});
+                        ctx.strokeStyle = '#6bb5ff';
+                        ctx.lineWidth = 8;
+                        ctx.beginPath();
+                        ctx.arc(indexTip.x, indexTip.y, 10, 0, Math.PI*2);
+                        ctx.stroke();
+                    } else if (activePath.length > 0) {
+                        paths.push([...activePath]);
+                        activePath = [];
+                    }
+                }
+            } else {
+                document.getElementById('status').innerText = "EL ARANIYOR...";
+            }
+
+            // Çizilmiş yolları render et
+            ctx.strokeStyle = '#6bb5ff';
+            ctx.lineWidth = 5;
+            ctx.lineCap = 'round';
+            [...paths, activePath].forEach(path => {
+                if (path.length < 2) return;
+                ctx.beginPath();
+                ctx.moveTo(path[0].x, path[0].y);
+                path.forEach(p => ctx.lineTo(p.x, p.y));
+                ctx.stroke();
+            });
+        }
+
+        function clearDraw() { paths = []; activePath = []; }
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+</html>
